@@ -142,7 +142,6 @@ bool parseJson(JsonDocument(*doc), const char *json)
   }
   else
   {
-    delay(1000);
     Particle.publish("deserialized json", json, 21600, PRIVATE);
     return true;
   }
