@@ -6,29 +6,32 @@
 #line 1 "/Users/rob/Downloads/git/simple_robot_arm/src/simple_robot_arm.ino"
 #include <ArduinoJson.h>
 
+// JSON key names for the 4 servos
 void publishInt(const char *name, int integer);
 int midpoint(int minimum, int maximum);
 void toggleServos();
 void setup();
 bool didAttachServer(bool result, uint16_t pin);
 int moveServoFunc(String extra);
-bool compareValToMinMax(int *target, int *receivedValue, int minValue, int maxValue);
+bool safeSetTargetValue(int *target, int *receivedValue, int minValue, int maxValue);
 void checkIfOutsideRange(int *target, int *receivedValue, const char *valueToCheck);
 void parseAndStoreJson(const char *json);
 void setServos();
 void writeToServo(Servo *servo, int target);
 void loop();
-#line 3 "/Users/rob/Downloads/git/simple_robot_arm/src/simple_robot_arm.ino"
+#line 4 "/Users/rob/Downloads/git/simple_robot_arm/src/simple_robot_arm.ino"
 #define SERVO_BASE_NAME "base"
 #define SERVO_LEFT_NAME "left"
 #define SERVO_RIGHT_NAME "right"
 #define SERVO_GRIP_NAME "grip"
-#define JSON_TEMPLATE "{\"base\":%d,\"left\":%d,\"right\":%d,\"grip\":%d}"
+
+// pinout for each servo
 #define SERVO_BASE_PIN D0
 #define SERVO_LEFT_PIN D1
 #define SERVO_RIGHT_PIN D2
 #define SERVO_GRIP_PIN D3
 
+//min and max ranges for each servo
 #define SERVO_BASE_MIN 0
 #define SERVO_BASE_MAX 180
 #define SERVO_LEFT_MIN 30
@@ -37,6 +40,10 @@ void loop();
 #define SERVO_RIGHT_MAX 150
 #define SERVO_GRIP_MIN 5
 #define SERVO_GRIP_MAX 40
+
+// macros to accomodate different size key names
+#define JSON_TEMPLATE "{\"%s\":%d,\"%s\":%d,\"%s\":%d,\"%s\":%d}"
+#define LENGTH_OF_JSON_KEYS (sizeof(SERVO_BASE_NAME) + sizeof(SERVO_LEFT_NAME) + sizeof(SERVO_RIGHT_NAME) + sizeof(SERVO_GRIP_NAME))
 
 Servo servoBase;  // base
 Servo servoLeft;  // left
@@ -67,25 +74,38 @@ void toggleServos()
 {
   // when starting up, servos seem to get stuck. this moves them to one way then another.
 
-  char *buf;
-  buf = (char *)malloc(strlen(JSON_TEMPLATE) + 4 * sizeof(int));
+  char *buf;                                   //hold the JSON string
+  buf = (char *)malloc(sizeof(JSON_TEMPLATE) - //raw template
+                       16 * sizeof(char) +     // 4 x %s and 4 x %d
+                       LENGTH_OF_JSON_KEYS +   // the length of the text of the JSON keys
+                       4 * sizeof(int));       // 4 integer values
+
   // first, let's set to the min values
   sprintf(buf,
           JSON_TEMPLATE,
+          SERVO_BASE_NAME,
           SERVO_BASE_MIN,
+          SERVO_LEFT_NAME,
           SERVO_LEFT_MIN,
+          SERVO_RIGHT_NAME,
           SERVO_RIGHT_MIN,
+          SERVO_GRIP_NAME,
           SERVO_GRIP_MIN);
 
-  parseAndStoreJson((const char *)buf);
+  parseAndStoreJson(buf);
   setServos();
-  delay(150); // wait for it to move
+  delay(500); // wait for it to move
+
   // now return all to midpoints
   sprintf(buf,
           JSON_TEMPLATE,
+          SERVO_BASE_NAME,
           midpoint(SERVO_BASE_MIN, SERVO_BASE_MAX),
+          SERVO_LEFT_NAME,
           midpoint(SERVO_LEFT_MIN, SERVO_LEFT_MAX),
+          SERVO_RIGHT_NAME,
           midpoint(SERVO_RIGHT_MIN, SERVO_RIGHT_MAX),
+          SERVO_GRIP_NAME,
           midpoint(SERVO_GRIP_MIN, SERVO_GRIP_MAX));
 
   parseAndStoreJson(buf);
@@ -129,7 +149,7 @@ bool didAttachServer(bool result, uint16_t pin)
   sprintf(servoUsed, "%d", pin);
   if (result)
   {
-    Particle.publish("attached servo", servoUsed, 10, PRIVATE);
+    // Particle.publish("attached servo", servoUsed, 10, PRIVATE);
   }
   else
   {
@@ -161,13 +181,12 @@ bool parseJson(JsonDocument(*doc), const char *json)
   }
   else
   {
-    delay(1000);
     Particle.publish("deserialized json", json, 21600, PRIVATE);
     return true;
   }
 }
 
-bool compareValToMinMax(int *target, int *receivedValue, int minValue, int maxValue)
+bool safeSetTargetValue(int *target, int *receivedValue, int minValue, int maxValue)
 // compares the receivedValue to min + max, and if it's between them, assigns it to *target
 {
   if ((*receivedValue >= minValue) && (*receivedValue <= maxValue))
@@ -184,19 +203,19 @@ void checkIfOutsideRange(int *target, int *receivedValue, const char *valueToChe
   bool setServo = false;
   if (strcmp(valueToCheck, SERVO_BASE_NAME) == 0)
   {
-    setServo = compareValToMinMax(target, receivedValue, SERVO_BASE_MIN, SERVO_BASE_MAX);
+    setServo = safeSetTargetValue(target, receivedValue, SERVO_BASE_MIN, SERVO_BASE_MAX);
   }
   else if (strcmp(valueToCheck, SERVO_LEFT_NAME) == 0)
   {
-    setServo = compareValToMinMax(target, receivedValue, SERVO_LEFT_MIN, SERVO_LEFT_MAX);
+    setServo = safeSetTargetValue(target, receivedValue, SERVO_LEFT_MIN, SERVO_LEFT_MAX);
   }
   else if (strcmp(valueToCheck, SERVO_RIGHT_NAME) == 0)
   {
-    setServo = compareValToMinMax(target, receivedValue, SERVO_RIGHT_MIN, SERVO_RIGHT_MAX);
+    setServo = safeSetTargetValue(target, receivedValue, SERVO_RIGHT_MIN, SERVO_RIGHT_MAX);
   }
   else if (strcmp(valueToCheck, SERVO_GRIP_NAME) == 0)
   {
-    setServo = compareValToMinMax(target, receivedValue, SERVO_GRIP_MIN, SERVO_GRIP_MAX);
+    setServo = safeSetTargetValue(target, receivedValue, SERVO_GRIP_MIN, SERVO_GRIP_MAX);
   }
   if (!setServo)
   {
@@ -209,7 +228,7 @@ void checkIfOutsideRange(int *target, int *receivedValue, const char *valueToChe
 }
 
 // fetches a value if it exists in teh JSON
-bool fetchValueIfExists(JsonObject(*obj), int *target, const char *(valueToFetch))
+bool safeGetKeyValue(JsonObject(*obj), int *target, const char *(valueToFetch))
 {
   if (obj->containsKey(valueToFetch))
   {
@@ -223,7 +242,7 @@ bool fetchValueIfExists(JsonObject(*obj), int *target, const char *(valueToFetch
 void fetchValueAndSet(JsonObject(*objptr), int(*targetPtr), const char *(valueToFetch))
 {
   int *receivedValuePtr = (int *)malloc(sizeof(int));
-  if (fetchValueIfExists(objptr, receivedValuePtr, valueToFetch))
+  if (safeGetKeyValue(objptr, receivedValuePtr, valueToFetch))
   {
     checkIfOutsideRange(targetPtr, receivedValuePtr, valueToFetch);
   }
@@ -234,7 +253,7 @@ void parseAndStoreJson(const char *json)
 {
   // receive the JSON for the servo states and store
 
-  const size_t capacity = JSON_OBJECT_SIZE(4) + 30;
+  const size_t capacity = JSON_OBJECT_SIZE(4) + LENGTH_OF_JSON_KEYS;
   StaticJsonDocument<capacity> doc;
 
   if (!parseJson(&doc, json))
@@ -273,8 +292,10 @@ void setServos()
 }
 void writeToServo(Servo *servo, int target)
 {
-  //  whites a specific servo
+  //  writes a specific servo
+  // separated out to allow e.g. a delay to be added etc.
   servo->write(target);
+  delay(2);
 }
 
 void loop()
