@@ -52,12 +52,24 @@ int targetGrip = 20;
 void publishInt(const char *name, int integer)
 {
   char *buf;
-  buf = (char *)malloc(sizeof(int));
+  buf = (char *)malloc(snprintf(NULL, 0, "%d", integer));
+  if (buf == NULL)
+  {
+    publishChar("Out of memory", "publishInt");
+    return;
+  }
   sprintf(buf, "%d", integer);
-  Particle.publish(name, buf, 0, PRIVATE);
+  publishChar(name, buf);
   free(buf);
 }
 
+void publishChar(const char *name, const char *message)
+{
+
+  delay(1000); // ensure not throttled
+  Particle.publish(name, message, 0, PRIVATE);
+  delay(1000); // ensure not throttled
+}
 int midpoint(int minimum, int maximum)
 {
   return minimum + ((maximum - minimum) / 2);
@@ -67,12 +79,17 @@ void toggleServos()
 {
   // when starting up, servos seem to get stuck. this moves them to one way then another.
 
-  char *buf;                                   //hold the JSON string
-  buf = (char *)malloc(sizeof(JSON_TEMPLATE) - //raw template
-                       16 * sizeof(char) +     // 4 x %s and 4 x %d
-                       LENGTH_OF_JSON_KEYS +   // the length of the text of the JSON keys
-                       4 * sizeof(int));       // 4 integer values
-
+  char *buf;                                              //hold the JSON string
+  buf = (char *)malloc(sizeof(JSON_TEMPLATE) -            //raw template
+                       16 * sizeof(char) +                // 4 x %s and 4 x %d
+                       LENGTH_OF_JSON_KEYS +              // the length of the text of the JSON keys
+                       4 * snprintf(NULL, 0, "%d", 180)); // 4 integer values
+  if (buf == NULL)
+  {
+    publishChar("Out of memory", "toggleServos");
+    free(buf);
+    return;
+  }
   // first, let's set to the min values
   sprintf(buf,
           JSON_TEMPLATE,
@@ -87,7 +104,7 @@ void toggleServos()
 
   parseAndStoreJson(buf);
   setServos();
-  delay(500); // wait for it to move
+  delay(1000); // wait for it to move
 
   // now return all to midpoints
   sprintf(buf,
@@ -142,11 +159,11 @@ bool didAttachServer(bool result, uint16_t pin)
   sprintf(servoUsed, "%d", pin);
   if (result)
   {
-    // Particle.publish("attached servo", servoUsed, 10, PRIVATE);
+    // publishChar("attached servo", servoUsed);
   }
   else
   {
-    Particle.publish("Cannot attach to servo", servoUsed, 10, PRIVATE);
+    publishChar("Cannot attach to servo", servoUsed);
   }
   return result;
 }
@@ -169,12 +186,12 @@ bool parseJson(JsonDocument(*doc), const char *json)
   DeserializationError err = deserializeJson(*doc, json);
   if (err)
   {
-    Particle.publish("DeserializationError", err.c_str(), 10, PRIVATE);
+    publishChar("DeserializationError", err.c_str());
     return false;
   }
   else
   {
-    Particle.publish("deserialized json", json, 21600, PRIVATE);
+    publishChar("deserialized json", json);
     return true;
   }
 }
@@ -190,32 +207,53 @@ bool safeSetTargetValue(int *target, int *receivedValue, int minValue, int maxVa
   return false;
 }
 
-void checkIfOutsideRange(int *target, int *receivedValue, const char *valueToCheck)
+void checkIfOutsideRange(int *target, int *receivedValue, const char *servoName)
 // checks if a value is wihtin allowed range for this specific servo
 {
-  bool setServo = false;
-  if (strcmp(valueToCheck, SERVO_BASE_NAME) == 0)
+  int servo_min = 0;
+  int servo_max = 0;
+
+  if (strcmp(servoName, SERVO_BASE_NAME) == 0)
   {
-    setServo = safeSetTargetValue(target, receivedValue, SERVO_BASE_MIN, SERVO_BASE_MAX);
+    servo_min = SERVO_BASE_MIN;
+    servo_max = SERVO_BASE_MAX;
   }
-  else if (strcmp(valueToCheck, SERVO_LEFT_NAME) == 0)
+  else if (strcmp(servoName, SERVO_LEFT_NAME) == 0)
   {
-    setServo = safeSetTargetValue(target, receivedValue, SERVO_LEFT_MIN, SERVO_LEFT_MAX);
+    servo_min = SERVO_LEFT_MIN;
+    servo_max = SERVO_LEFT_MAX;
   }
-  else if (strcmp(valueToCheck, SERVO_RIGHT_NAME) == 0)
+  else if (strcmp(servoName, SERVO_RIGHT_NAME) == 0)
   {
-    setServo = safeSetTargetValue(target, receivedValue, SERVO_RIGHT_MIN, SERVO_RIGHT_MAX);
+    servo_min = SERVO_RIGHT_MIN;
+    servo_max = SERVO_RIGHT_MAX;
   }
-  else if (strcmp(valueToCheck, SERVO_GRIP_NAME) == 0)
+  else if (strcmp(servoName, SERVO_GRIP_NAME) == 0)
   {
-    setServo = safeSetTargetValue(target, receivedValue, SERVO_GRIP_MIN, SERVO_GRIP_MAX);
+    servo_min = SERVO_GRIP_MIN;
+    servo_max = SERVO_GRIP_MAX;
   }
-  if (!setServo)
+  if (!safeSetTargetValue(target, receivedValue, servo_min, servo_max))
   {
     char *buf;
-    buf = (char *)malloc(strlen(valueToCheck) + sizeof(int) + 8 * sizeof(char));
-    sprintf(buf, "s: %s, v: %d", valueToCheck, *receivedValue);
-    Particle.publish("failed to set servo", buf, 10, PRIVATE);
+    // "{s: %s, v: %d, min: %d, max: %d}";
+    size_t buffersz = (32-8) * sizeof(char) +                   //template less %s + 3 x %d
+                      strlen(servoName) +                       //name of the servo
+                      snprintf(NULL, 0, "%d", *receivedValue) + // requested value
+                      snprintf(NULL, 0, "%d", servo_min) +      // min value
+                      snprintf(NULL, 0, "%d", servo_max) +      // max value
+                      1;
+    buf = (char*)malloc(buffersz);
+
+    if (buf == NULL)
+    {
+      publishChar("Out of memory", "safeSetTargetValue");
+      free(buf);
+      return;
+    }
+    snprintf(buf,buffersz,  "{s: %s, v: %d, min: %d, max: %d}", servoName, *receivedValue, servo_min, servo_max);
+
+    publishChar("failed to set servo", buf);
     free(buf);
   }
 }
@@ -235,6 +273,12 @@ bool safeGetKeyValue(JsonObject(*obj), int *target, const char *(valueToFetch))
 void fetchValueAndSet(JsonObject(*objptr), int(*targetPtr), const char *(valueToFetch))
 {
   int *receivedValuePtr = (int *)malloc(sizeof(int));
+  if (receivedValuePtr == NULL)
+  {
+    publishChar("Out of memory", "fetchValueAndSet");
+    free(receivedValuePtr);
+    return;
+  }
   if (safeGetKeyValue(objptr, receivedValuePtr, valueToFetch))
   {
     checkIfOutsideRange(targetPtr, receivedValuePtr, valueToFetch);
@@ -274,14 +318,19 @@ void parseAndStoreJson(const char *json)
 void setServos()
 {
   // sets all 4 servos to the currently set values
-  Particle.publish("setting servos", "", 21600, PRIVATE);
+  publishChar("setting servos", "");
+  publishInt("targetBase", targetBase);
   writeToServo(&servoBase, targetBase);
+  publishInt("targetLeft", targetLeft);
   writeToServo(&servoLeft, targetLeft);
+  publishInt("targetRight", targetRight);
   writeToServo(&servoRight, targetRight);
+  publishInt("targetGrip", targetGrip);
   writeToServo(&servoGrip, targetGrip);
 
   // toggle LED to indicate complete
   digitalWrite(D7, HIGH - digitalRead(D7));
+  publishChar("exiting", "setServos");
 }
 void writeToServo(Servo *servo, int target)
 {
