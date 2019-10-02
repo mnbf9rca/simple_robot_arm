@@ -237,13 +237,13 @@ void checkIfOutsideRange(int *target, int *receivedValue, const char *servoName)
   {
     char *buf;
     // "{s: %s, v: %d, min: %d, max: %d}";
-    size_t buffersz = (32-8) * sizeof(char) +                   //template less %s + 3 x %d
+    size_t buffersz = (32 - 8) * sizeof(char) +                 //template less %s + 3 x %d
                       strlen(servoName) +                       //name of the servo
                       snprintf(NULL, 0, "%d", *receivedValue) + // requested value
                       snprintf(NULL, 0, "%d", servo_min) +      // min value
                       snprintf(NULL, 0, "%d", servo_max) +      // max value
                       1;
-    buf = (char*)malloc(buffersz);
+    buf = (char *)malloc(buffersz);
 
     if (buf == NULL)
     {
@@ -251,7 +251,7 @@ void checkIfOutsideRange(int *target, int *receivedValue, const char *servoName)
       free(buf);
       return;
     }
-    snprintf(buf,buffersz,  "{s: %s, v: %d, min: %d, max: %d}", servoName, *receivedValue, servo_min, servo_max);
+    snprintf(buf, buffersz, "{s: %s, v: %d, min: %d, max: %d}", servoName, *receivedValue, servo_min, servo_max);
 
     publishChar("failed to set servo", buf);
     free(buf);
