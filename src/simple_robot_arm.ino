@@ -65,8 +65,6 @@ void publishInt(const char *name, int integer)
 
 void publishChar(const char *name, const char *message)
 {
-
-  delay(1000); // ensure not throttled
   Particle.publish(name, message, 0, PRIVATE);
   delay(1000); // ensure not throttled
 }
